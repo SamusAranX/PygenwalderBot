@@ -1,5 +1,3 @@
-ruegenwalderbot
+twitter
+twitterapi
 samusaranx
-t_teewurst
-sisupo
-lilasede
