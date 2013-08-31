@@ -1,2 +1,8 @@
 
 .DS_Store
+
+*.log
+
+*.pyc
+
+test.py

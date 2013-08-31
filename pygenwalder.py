@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -- coding: utf-8 --
-import os, sys, logging, random, signal
+
+import os, sys, logging, random
 import tweetpony
 from time import strftime
 from terminalsize import get_terminal_size
@@ -9,8 +10,11 @@ logging.getLogger("requests").setLevel(logging.WARNING) #Logspam von Requests un
 logging.basicConfig(filename="pygenwalder.log", level=logging.DEBUG)
 logger = logging.getLogger()
 
-ts = get_terminal_size() 
-twidth = ts[0] #Eig. immer 80
+os.environ["LINES"] = "25"
+os.environ["COLUMNS"] = "140"
+
+ts = get_terminal_size()
+twidth = ts[0]
 
 #https://dev.twitter.com/discussions/19096 #hooray for unicode
 
@@ -22,14 +26,20 @@ access_token = ""
 access_token_secret = ""
 
 responses = ["Rügenwalder.", "Teewurst?", "Diese hier?", "Die mit der Mühle.", "Alle."]
+# keywordstest = ["cdu", "csu", "piraten", "fdp", "grüne", "linke", "npd", "spd"]
 keywords = ["teewurst", "rügenwalder", "rugenwalder"]
-ignoredusers = []
+ignoredusers = ["samusaranx", "ruegenwalderbot", "drwatson", "sherlock"]
 
-def signal_handler(signal, frame):
-	print "\nKeyboardInterrupt!"
-	sys.exit(0)
+randomresponse = ""
+def get_random_response():
+	global randomresponse
+	ret = random.choice(responses)
+	if ret == randomresponse:
+		ret = get_random_response()
 
-signal.signal(signal.SIGINT, signal_handler) #Unnötigen Traceback bei Ctrl+C verhindern
+	randomresponse = ret
+
+	return ret
 
 class StreamProcessor(tweetpony.StreamProcessor):
 	def on_limit(self, event):
@@ -46,52 +56,63 @@ class StreamProcessor(tweetpony.StreamProcessor):
 		screen_name_lower = screen_name.lower()
 		tweet = status.text
 		ltweet = tweet.lower()
+		tweetid = status.id
 
-		print strftime("[%d.%m.%y %H:%M:%S] ") + "Neuer Tweet!"
-		
-		#Nur fortfahren, wenn der User nicht ignoriert wird und der Tweet kein Retweet ist
-		if not screen_name_lower in ignoredusers and tweet[:2] != "RT":
-			print "@" + screen_name + " wird nicht ignoriert und Tweet ist kein Retweet"
-			if ltweet[:16] == "@ruegenwalderbot": #Ist der Tweet ne Mention?
-				if ltweet[17:23] == "ignore":
-					print "User will ignoriert werden"
+		#fuck grammar, these variable names all have the same width now
+		isignored = screen_name_lower in ignoredusers
+		isretweet = ltweet[:2] == "rt"
+		ismatched = any(r.decode("utf8") in ltweet for r in keywords)
+		ismention = ltweet[:16] == "@ruegenwalderbot"
+
+		if not isignored and not isretweet:
+			print_tweet(screen_name, tweet)
+			if ismention:
+				if tweet[17:23] == "IGNORE":
 					ignoredusers.append(screen_name_lower)
 					write_ignorelist(ignoredusers)
+					print "@" + screen_name + " wird jetzt ignoriert"
 				else:
-					print "Tweet ist normale Mention"
 					try:
-						self.api.update_status(status = "@" + screen_name + " " + random.choice(responses), in_reply_to_status_id = status.id, lat = 53.174425, long = 8.059600, place_id = "Rügenwalder Mühle")
-						print strftime("[%d.%m.%y %H:%M:%S] ") + "Rügenwalderte @" + screen_name.encode("utf8")
+						randomresponse = get_random_response()
+						self.api.update_status(status = "@" + screen_name + " " + randomresponse, in_reply_to_status_id = tweetid, lat = 53.174425, long = 8.059600, place_id = "Rügenwalder Mühle")
+						print "Antwortete mit " + randomresponse
 					except tweetpony.APIError as err:
-						print strftime("[%d.%m.%y %H:%M:%S] ") + "Konnte nicht auf Tweet antworten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description)
-						logging.error("Konnte nicht auf Tweet antworten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description))
+						print "Konnte nicht auf Tweet antworten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description)
 			else:
-				print "Tweet ist normaler Tweet, der ein Keyword enthält"
 				try:
-					self.api.retweet(id = status.id)
-					print strftime("[%d.%m.%y %H:%M:%S] ") + "Retweetete @" + screen_name.encode("utf8")
+					self.api.retweet(id = tweetid)
+					print "Retweetet."
 				except tweetpony.APIError as err:
-					print strftime("[%d.%m.%y %H:%M:%S] ") + "Konnte Tweet nicht retweeten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description)
-					logging.error("Konnte Tweet nicht retweeten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description))
-		elif screen_name_lower in ignoredusers and tweet[:2] != "RT" and tweet[:25] == "@ruegenwalderbot unignore":
-			print "@" + screen_name + " wird ignoriert, Tweet ist kein Retweet und User will entignoriert werden"
-			print "@" + screen_name.encode("utf8") + ": " + tweet.encode("utf8")
-			if screen_name_lower in ignoredusers:
-				ignoredusers.remove(screen_name_lower)
-				write_ignorelist(ignoredusers)
-				print strftime("[%d.%m.%y %H:%M:%S] ") + "@" + screen_name.encode("utf8") + " wurde entignoriert."
+					print "Konnte Tweet nicht retweeten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description)
+		elif isignored and not isretweet:
+			print_tweet(screen_name, tweet)
+			if ismention:
+				if tweet[17:25] == "UNIGNORE":
+					if screen_name_lower in ignoredusers:
+						ignoredusers.remove(screen_name_lower)
+						write_ignorelist(ignoredusers)
+						print "@" + screen_name + " wird nicht mehr ignoriert"
+				else:
+					print "@" + screen_name + " wird ignoriert."
+			else:
+				print "@" + screen_name + " wird ignoriert."
+		elif isretweet:
+			print "Retweet, don't handle"
 		else:
-			print "Unbekannt, Tweet einfach so printen"
-			print "@" + screen_name.encode("utf8") + ": " + tweet.encode("utf8")
+			print_tweet(screen_name, tweet)
+			print "Dunno what to do"
+
 
 	def on_error(self, status):
 		print "ERROR"
 		print status #how do i error handling
-		# logging.error(status)
+		logging.error(status)
 
 	def on_disconnect(self, event):
-		# logging.debug("Disconnct: " + str(event))
-		pass
+		logging.debug("Disconnect: " + str(event))
+
+def print_tweet(screen_name, tweet):
+	print "@" + screen_name.encode("utf8") + ": " + tweet.encode("utf8")
 
 def main():
 	print "".center(twidth, "-")
@@ -99,7 +120,7 @@ def main():
 	print "".center(twidth, "-")
 
 	try:
-		with open("tokens.txt") as f:
+		with open(os.path.expanduser("tokens.txt")) as f:
 			tokens = f.readlines()
 			consumer_key = tokens[0].strip()
 			consumer_secret = tokens[1].strip()
@@ -108,11 +129,11 @@ def main():
 		print "Tokens gelesen."
 	except IOError:
 		print "Konnte keine Tokens finden. Stell sicher, dass es eine tokens.txt mit gültigen Tokens gibt."
-		# logging.error("Konnte keine Tokens finden. Stell sicher, dass es eine tokens.txt mit gültigen Tokens gibt.")
+		logging.error("Konnte keine Tokens finden. Stell sicher, dass es eine tokens.txt mit gültigen Tokens gibt.")
 		sys.exit(1)
 
 	try:
-		with open("ignoredusers.txt") as f:
+		with open(os.path.expanduser("ignoredusers.txt")) as f:
 			ignoredusers = [x.strip() for x in f.readlines()]
 		print "Ignorierte User:"
 		print ", ".join(ignoredusers)
@@ -120,13 +141,14 @@ def main():
 		print ", ".join(keywords)
 	except IOError:
 		print "Keine ignorierten User."
-		# logging.info("Keine ignorierten User.")
 
 	api = tweetpony.API(consumer_key, consumer_secret, access_token, access_token_secret)
 	processor = StreamProcessor(api)
 	try:
-		api.user_stream(processor = processor, track = ",".join(keywords), replies = "all", language = "de-de") #https://dev.twitter.com/discussions/19096
-		print "Stream beendet."
+		# api.filter_stream(processor = processor, track = ",".join(keywords), language = "de-de" )
+		api.user_stream(processor = processor, track = ",".join(keywords), replies = "all", language = "de") #https://dev.twitter.com/discussions/19096
+		print "Fuck."
+		logging.debug("Stream beendet.")
 		sys.exit(1)
 	except KeyboardInterrupt:
 		logging.info("KeyboardInterrupt!")
@@ -135,14 +157,16 @@ def main():
 		pass
 	except:
 		print "Fuck."
-		print "Unexpected error: ", sys.exc_info()[0]
-		# logging.debug("Unexpected error:", sys.exc_info()[0])
+		print "Unexpected error: "
+		print sys.exc_info()[0]
+		print sys.exc_info()[1]
+		logging.error("Unexpected error: " + str(sys.exc_info()[0]) + " - " + str(sys.exc_info()[1]))
 
 def write_ignorelist(list):
-	f = open("ignoredusers2.txt", "w")
+	f = open(os.path.expanduser("ignoredusers.txt"), "w")
 	for x in list:
 		print x
-		f.write(x.strip() + "\n")
+		f.write("\n".join(ignoredusers))
 	f.close()
 	# logging.debug("Überschrieb die Ignoreliste")
 	print "Überschrieb die Ignoreliste"
