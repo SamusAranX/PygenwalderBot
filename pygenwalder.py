@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -- coding: utf-8 --
 
-import os, sys, logging, random
+import os, sys, logging, random, re
 import tweetpony
 from time import strftime
 from terminalsize import get_terminal_size
@@ -26,9 +26,8 @@ access_token = ""
 access_token_secret = ""
 
 responses = ["Rügenwalder.", "Teewurst?", "Diese hier?", "Die mit der Mühle.", "Alle."]
-# keywordstest = ["cdu", "csu", "piraten", "fdp", "grüne", "linke", "npd", "spd"]
-keywords = ["teewurst", "rügenwalder", "rugenwalder"]
-ignoredusers = ["samusaranx", "ruegenwalderbot", "drwatson", "sherlock"]
+keywords = ["teewurst", "rügenwalder", "rugenwalder", "ruegenwalderbot"]
+ignoredusers = []
 
 randomresponse = ""
 def get_random_response():
@@ -61,10 +60,30 @@ class StreamProcessor(tweetpony.StreamProcessor):
 		#fuck grammar, these variable names all have the same width now
 		isignored = screen_name_lower in ignoredusers
 		isretweet = ltweet[:2] == "rt"
-		ismatched = any(r.decode("utf8") in ltweet for r in keywords)
+		# ismatched = any(r.decode("utf8") in ltweet for r in keywords)
 		ismention = ltweet[:16] == "@ruegenwalderbot"
+		iscommand = ismention and screen_name == "SamusAranX"
 
-		if not isignored and not isretweet:
+		if iscommand and not isretweet:
+			if tweet[17:23] == "IGNORE":
+				print tweet[24:]
+			elif tweet[17:25] == "UNIGNORE":
+				print tweet[26:]
+			else:
+				print "Unknown command: " + tweet
+		elif isignored and not isretweet:
+			print_tweet(screen_name, tweet)
+			if ismention:
+				if tweet[17:25] == "UNIGNORE":
+					if screen_name_lower in ignoredusers:
+						ignoredusers.remove(screen_name_lower)
+						write_ignorelist(ignoredusers)
+						print "@" + screen_name + " wird nicht mehr ignoriert"
+				else:
+					print "@" + screen_name + " wird ignoriert."
+			else:
+				print "@" + screen_name + " wird ignoriert."
+		elif not isignored and not isretweet:
 			print_tweet(screen_name, tweet)
 			if ismention:
 				if tweet[17:23] == "IGNORE":
@@ -84,20 +103,8 @@ class StreamProcessor(tweetpony.StreamProcessor):
 					print "Retweetet."
 				except tweetpony.APIError as err:
 					print "Konnte Tweet nicht retweeten: Twitter gab Fehler #%i zurück: %s" % (err.code, err.description)
-		elif isignored and not isretweet:
-			print_tweet(screen_name, tweet)
-			if ismention:
-				if tweet[17:25] == "UNIGNORE":
-					if screen_name_lower in ignoredusers:
-						ignoredusers.remove(screen_name_lower)
-						write_ignorelist(ignoredusers)
-						print "@" + screen_name + " wird nicht mehr ignoriert"
-				else:
-					print "@" + screen_name + " wird ignoriert."
-			else:
-				print "@" + screen_name + " wird ignoriert."
-		elif isretweet:
-			print "Retweet, don't handle"
+		# elif isretweet:
+		# 	print "Retweet, don't handle"
 		else:
 			print_tweet(screen_name, tweet)
 			print "Dunno what to do"
@@ -120,12 +127,21 @@ def main():
 	print "".center(twidth, "-")
 
 	try:
-		with open(os.path.expanduser("tokens.txt")) as f:
-			tokens = f.readlines()
-			consumer_key = tokens[0].strip()
-			consumer_secret = tokens[1].strip()
-			access_token = tokens[2].strip()
-			access_token_secret = tokens[3].strip()
+		try:
+			with open(os.path.expanduser("~/Documents/PygenwalderBot/tokens.txt")) as f:
+				tokens = f.readlines()
+				consumer_key = tokens[0].strip()
+				consumer_secret = tokens[1].strip()
+				access_token = tokens[2].strip()
+				access_token_secret = tokens[3].strip()
+		except IOError:
+			with open("tokens.txt") as f:
+				tokens = f.readlines()
+				consumer_key = tokens[0].strip()
+				consumer_secret = tokens[1].strip()
+				access_token = tokens[2].strip()
+				access_token_secret = tokens[3].strip()
+
 		print "Tokens gelesen."
 	except IOError:
 		print "Konnte keine Tokens finden. Stell sicher, dass es eine tokens.txt mit gültigen Tokens gibt."
@@ -133,8 +149,12 @@ def main():
 		sys.exit(1)
 
 	try:
-		with open(os.path.expanduser("ignoredusers.txt")) as f:
-			ignoredusers = [x.strip() for x in f.readlines()]
+		try:
+			with open(os.path.expanduser("~/Documents/PygenwalderBot/ignoredusers.txt")) as f:
+				ignoredusers = [x.strip() for x in f.readlines()]
+		except IOError:
+			with open("ignoredusers.txt") as f:
+				ignoredusers = [x.strip() for x in f.readlines()]
 		print "Ignorierte User:"
 		print ", ".join(ignoredusers)
 		print "Keywords:"
@@ -146,6 +166,7 @@ def main():
 	processor = StreamProcessor(api)
 	try:
 		# api.filter_stream(processor = processor, track = ",".join(keywords), language = "de-de" )
+		print "Initiating Stream."
 		api.user_stream(processor = processor, track = ",".join(keywords), replies = "all", language = "de") #https://dev.twitter.com/discussions/19096
 		print "Fuck."
 		logging.debug("Stream beendet.")
@@ -163,7 +184,10 @@ def main():
 		logging.error("Unexpected error: " + str(sys.exc_info()[0]) + " - " + str(sys.exc_info()[1]))
 
 def write_ignorelist(list):
-	f = open(os.path.expanduser("ignoredusers.txt"), "w")
+	try:
+		f = open(os.path.expanduser("~/Documents/PygenwalderBot/ignoredusers.txt", "w"))
+	except IOError:
+		f = open("ignoredusers.txt", "w")
 	for x in list:
 		print x
 		f.write("\n".join(ignoredusers))
