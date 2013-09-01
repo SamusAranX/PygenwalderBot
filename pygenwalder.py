@@ -10,9 +10,6 @@ logging.getLogger("requests").setLevel(logging.WARNING) #Logspam von Requests un
 logging.basicConfig(filename="pygenwalder.log", level=logging.DEBUG)
 logger = logging.getLogger()
 
-os.environ["LINES"] = "25"
-os.environ["COLUMNS"] = "140"
-
 ts = get_terminal_size()
 twidth = ts[0]
 
@@ -57,7 +54,6 @@ class StreamProcessor(tweetpony.StreamProcessor):
 		ltweet = tweet.lower()
 		tweetid = status.id
 
-		#fuck grammar, these variable names all have the same width now
 		isignored = screen_name_lower in ignoredusers
 		isretweet = ltweet[:2] == "rt"
 		# ismatched = any(r.decode("utf8") in ltweet for r in keywords)
